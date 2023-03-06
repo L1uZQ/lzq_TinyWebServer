@@ -43,7 +43,7 @@ public:
     enum LINE_STATUS {LINE_OK =0, LINE_BAD, LINE_OPEN};
 
     //处理http请求的可能结果
-    enum HTTP_CODE {NO_REQUEST, GET_REQUEST, BAD_REQUEST, NO_REQUEST, NO_RESOURCE,
+    enum HTTP_CODE {NO_REQUEST, GET_REQUEST, BAD_REQUEST,  NO_RESOURCE,
         FORBIDDEN_REQUEST, FILE_REQUEST, INTERNAL_ERROR, CLOSED_CONNECTION};
     
 public:
@@ -67,7 +67,7 @@ private:
     char * m_version; //协议版本，目前只支持http1.1
     METHOD m_method; //请求方法，GET POST
     char * m_host; //主机名
-    bool m_linker; //http请求是否要保持连接(长链接)
+    bool m_linger; //http请求是否要保持连接(长链接)
     int m_content_length;// HTTP请求的消息总长度
     // 客户请求的目标文件的完整路径，其内容等于 doc_root + m_url, doc_root是网站根目?
     char m_real_file[ FILENAME_LEN ]; //客户请求的目标文件的完整路径   

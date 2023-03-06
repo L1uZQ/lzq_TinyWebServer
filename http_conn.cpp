@@ -21,6 +21,7 @@ const char* error_500_form = "There was an unusual problem serving the requested
 //网站资源目录
 const char * doc_root ="/home/lzq/lzq_TinyWebServer/resources";
 
+
 //设置文件描述符非阻塞
 void setnonblocking(int fd){
     int old_flag = fcntl(fd, F_GETFL);
@@ -32,8 +33,8 @@ void setnonblocking(int fd){
 void addfd(int epollfd, int fd, bool one_shot){
     epoll_event event;
     event.data.fd = fd;
-    //event.events = EPOLLIN | EPOLLRDHUP;
-    event.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
+    event.events = EPOLLIN | EPOLLRDHUP;
+    // event.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
 
     if(one_shot){
         event.events | EPOLLONESHOT;
@@ -50,12 +51,14 @@ void removefd(int epollfd, int fd){
 }
 
 //修改文件描述符,重置socket上的EPOLLONESHOT 事件，确保下一次可读时，事件能被触发
-void modfd(int epollfd, int fd, int ev){
+void modfd(int epollfd, int fd, int ev) {
     epoll_event event;
     event.data.fd = fd;
-    event.events = ev | EPOLLONESHOT | EPOLLRDHUP;
-    epoll_ctl(epollfd, EPOLL_CTL_MOD, fd, &event);
+    event.events = ev | EPOLLET | EPOLLONESHOT | EPOLLRDHUP;
+    epoll_ctl( epollfd, EPOLL_CTL_MOD, fd, &event );
 }
+
+
 
 //初始化连接
 void http_conn::init(int sockfd, const sockaddr_in & addr){
@@ -88,7 +91,7 @@ void http_conn::init(){
     m_url = 0;
     m_host=0;
     m_version = 0;
-    m_linker=false; //是否要保持连接，默认不保持链接  Connection : keep-alive保持连接
+    m_linger=false; //是否要保持连接，默认不保持链接  Connection : keep-alive保持连接
     m_content_length=0;
 
     m_write_idx=0;
@@ -114,7 +117,6 @@ bool http_conn::read(){
     if(m_read_index >= READ_BUFFER_SIZE){
         return false;
     }
-
     //读取到的字节
     int bytes_read=0;
     while(true){
@@ -251,7 +253,7 @@ http_conn::HTTP_CODE http_conn::parse_headers(char * text){
         text += 11;
         text += strspn(text, " \t");
         if(strcasecmp(text,"Keep-alive")==0){
-            m_linker = true;
+            m_linger = true;
         }
     }else if(strncasecmp(text, "Content-Length:",15)==0){
             //处理Content-Length头部字段
@@ -396,7 +398,7 @@ bool http_conn::write(){
             unmap();
             modfd(m_epollfd, m_sockfd, EPOLLIN);
 
-            if (m_linker) //如果要保持连接
+            if (m_linger) //如果要保持连接
             {
                 init();
                 return true;
@@ -408,7 +410,7 @@ bool http_conn::write(){
         }
 
     }
-    // printf("一次性写完数据\n");
+    printf("一次性写完数据\n");
     // return true;
 }
 
@@ -449,7 +451,7 @@ bool http_conn::add_content_length(int content_len) {
 //响应报文连接状态
 bool http_conn::add_linger()
 {
-    return add_response( "Connection: %s\r\n", ( m_linker == true ) ? "keep-alive" : "close" );
+    return add_response( "Connection: %s\r\n", ( m_linger == true ) ? "keep-alive" : "close" );
 }
 
 //响应报文 加空行
@@ -470,7 +472,7 @@ bool http_conn::add_content_type() {
 }
 
 bool http_conn::process_write(HTTP_CODE ret) {
-        switch (ret)
+    switch (ret)
     {
         case INTERNAL_ERROR:
             add_status_line( 500, error_500_title );
@@ -529,14 +531,13 @@ void http_conn::process(){
     //解析http请求
 
     HTTP_CODE read_ret = process_read();
-    
     //重新检测一下
     if(read_ret == NO_REQUEST){
         modfd(m_epollfd, m_sockfd, EPOLLIN);
         return ;
     }
 
-    //printf("parse request, create response\n");
+    printf("parse request, create response\n");
 
     //生成响应
     bool write_ret = process_write( read_ret );
