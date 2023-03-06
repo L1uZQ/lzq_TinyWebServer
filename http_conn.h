@@ -73,6 +73,7 @@ private:
     //从状态机
     LINE_STATUS parse_line(); //获取一行
     char * get_line(){return m_read_buf + m_start_line;}
+    HTTP_CODE do_request(); //具体的处理
 
 };
 

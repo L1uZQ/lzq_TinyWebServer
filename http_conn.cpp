@@ -120,13 +120,55 @@ http_conn::HTTP_CODE http_conn::process_read(){
         //获取一行数据
         text= get_line();
         m_start_line = m_checked_index;
-    }
+        printf("got 1 http line : %s\n", text);
 
+        switch(m_check_state){ //根据主状态机的情况做不同的处理
+            case CHECK_STATE_REQUESTLINE: //请求行
+            {
+                ret = parse_request_line(text);
+                if(ret == BAD_REQUEST){
+                    return BAD_REQUEST; //请求语法错误，直接结束
+                }
+                break;
+            }
+
+            case CHECK_STATE_HEADER:
+            {
+                ret = parse_headers(text);
+                if(ret == BAD_REQUEST){
+                    return BAD_REQUEST;
+                }else if(ret == GET_REQUEST){ //获取一个完整的请求头
+                    return do_request(); //执行 （解析具体请求内容的函数）
+                }
+            }
+
+            case CHECK_STATE_CONTENT:
+            {
+                ret = parse_content(text);
+                if(ret == GET_REQUEST){
+                    return do_request();
+                }
+                line_status = LINE_OPEN;//如果失败，行数据还不完整
+                break;
+
+            }
+
+            default :
+            {
+                return INTERNAL_ERROR;
+            }
+        }
+        return NO_REQUEST; //如果整个都没有出错，请求不完整
+    }
 
     return NO_REQUEST;
 }
 
+//  解析http请求行， 获得请求方法，目标URL，HTTP版本
 http_conn::HTTP_CODE http_conn::parse_request_line(char * text){
+
+    // GET / HTTP/1.1
+    
 
     return NO_REQUEST;
 }
@@ -141,10 +183,38 @@ http_conn::HTTP_CODE http_conn::parse_content(char * text){
     return NO_REQUEST;
 }
 
-//从状态机
+//从状态机，解析一行，依据是\r\n
 http_conn::LINE_STATUS http_conn::parse_line(){
+    char temp;
+    //遍历一行数据
+    for( ; m_checked_index < m_read_index; ++m_checked_index){
+        temp = m_read_buf[m_checked_index];
+        if(temp == '\r'){
+            if(m_checked_index+1 == m_read_index){
+                return LINE_OPEN; //没有读取到完整的
+            }else if(m_read_buf[m_checked_index+1]=='\n'){
+                m_read_buf[m_checked_index++] = '\0';
+                m_read_buf[m_checked_index++] = '\0';
+                return LINE_OK;
+            }
+            return LINE_BAD;
+        }else if(temp == '\n'){
+            if((m_checked_index>1) && (m_read_buf[m_checked_index-1] == '\r')){
+                m_read_buf[m_checked_index-1]= '\0';
+                m_read_buf[m_checked_index++]= '\0';
+                return LINE_OK;
+            }
+            return LINE_BAD;
+        }
+        return LINE_OPEN; //都不满足，数据不完整，return LINE_OPEN
+    }
 
     return LINE_OK;
+}
+
+
+http_conn::HTTP_CODE http_conn::do_request(){
+
 }
 
 
