@@ -18,6 +18,8 @@
 #include"locker.h"
 #include<sys/uio.h>
 #include<cstring>
+#include<pthread.h>
+#include<assert.h>
 
 class http_conn{
 public:
@@ -36,8 +38,7 @@ public:
     enum METHOD {GET=0, POST, HEAD, PUT, DELETE, TRACE, OPTIONS,CONNECT};
 
     //主状态机状态
-    enum CHECK_STATE {CHECK_STATE_REQUESTLINE=0,
-    CHECK_STATE_HEADER, CHECK_STATE_CONTENT};
+    enum CHECK_STATE {CHECK_STATE_REQUESTLINE=0,CHECK_STATE_HEADER, CHECK_STATE_CONTENT};
     
     //从状态机状态
     enum LINE_STATUS {LINE_OK =0, LINE_BAD, LINE_OPEN};
@@ -63,15 +64,14 @@ private:
     int m_checked_index; //当前正在分析的字符在读缓冲区的位置
     int m_start_line; //当前正在解析的行的起始位置
 
+    char m_real_file[ FILENAME_LEN ]; //客户请求的目标文件的完整路径
     char * m_url; //请求目标文件的文件名
     char * m_version; //协议版本，目前只支持http1.1
-    METHOD m_method; //请求方法，GET POST
     char * m_host; //主机名
     bool m_linger; //http请求是否要保持连接(长链接)
     int m_content_length;// HTTP请求的消息总长度
-    // 客户请求的目标文件的完整路径，其内容等于 doc_root + m_url, doc_root是网站根目?
-    char m_real_file[ FILENAME_LEN ]; //客户请求的目标文件的完整路径   
-     
+
+    METHOD m_method; //请求方法，GET POST
     CHECK_STATE m_check_state; //主状态机当前状态
 
 
@@ -113,8 +113,5 @@ private:
     bool add_blank_line(); //添加空行
 
 };
-
-
-
 
 #endif

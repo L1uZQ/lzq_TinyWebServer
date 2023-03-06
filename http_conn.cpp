@@ -1,5 +1,4 @@
 #include"http_conn.h"
-#include<sys/epoll.h>
 
 //初始化静态变量
 int http_conn::m_epollfd = -1;
@@ -23,10 +22,11 @@ const char * doc_root ="/home/lzq/lzq_TinyWebServer/resources";
 
 
 //设置文件描述符非阻塞
-void setnonblocking(int fd){
+int setnonblocking(int fd){
     int old_flag = fcntl(fd, F_GETFL);
     int new_flag = old_flag | O_NONBLOCK;
     fcntl(fd, F_SETFL, new_flag);
+    return old_flag;
 }
 
 //用来向epoll中添加需要监听的文件描述符
@@ -37,6 +37,7 @@ void addfd(int epollfd, int fd, bool one_shot){
     // event.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
 
     if(one_shot){
+        // 防止同一个通信被不同的线程处理
         event.events | EPOLLONESHOT;
     }
     epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
@@ -56,6 +57,15 @@ void modfd(int epollfd, int fd, int ev) {
     event.data.fd = fd;
     event.events = ev | EPOLLET | EPOLLONESHOT | EPOLLRDHUP;
     epoll_ctl( epollfd, EPOLL_CTL_MOD, fd, &event );
+}
+
+//关闭连接
+void http_conn::close_conn(){
+    if(m_sockfd!=-1){
+        removefd(m_epollfd, m_sockfd);
+        m_sockfd = -1;
+        m_user_count--; //关闭一个连接，客户总数量减一
+    }
 }
 
 
@@ -79,7 +89,7 @@ void http_conn::init(int sockfd, const sockaddr_in & addr){
 
 //初始化变量和缓冲区，用一个单独的不带参的init函数来写，方便后面尽行重复调用
 void http_conn::init(){
-
+    printf("初始化\n");
     bytes_to_send = 0;
     bytes_have_send = 0;
 
@@ -102,18 +112,9 @@ void http_conn::init(){
 }
 
 
-//关闭连接
-void http_conn::close_conn(){
-    if(m_sockfd!=-1){
-        removefd(m_epollfd, m_sockfd);
-        m_sockfd = -1;
-        m_user_count--; //关闭一个连接，客户总数量减一
-    }
-}
-
 //循环读取客户数据，直到无数据可读或者对方关闭连接
 bool http_conn::read(){
-
+    // printf("READ::::\n");
     if(m_read_index >= READ_BUFFER_SIZE){
         return false;
     }
@@ -135,68 +136,40 @@ bool http_conn::read(){
         m_read_index += bytes_read;
     }
    // printf("一次性读出数据\n");
-    printf("读取到了数据: %s\n",m_read_buf);
+    printf("读取到了数据:\n%s\n",m_read_buf);
     return true;
 }
 
-
-//主状态机
-http_conn::HTTP_CODE http_conn::process_read(){
-
-    //初始状态
-    LINE_STATUS line_status = LINE_OK;
-    HTTP_CODE ret = NO_REQUEST;
-
-    char * text = 0;
-    
-    //一行一行去解析
-    while(((m_check_state == CHECK_STATE_CONTENT) && (line_status == LINE_OK)) || ((line_status = parse_line())== LINE_OK)){
-        //获取一行数据
-        text= get_line();
-        m_start_line = m_checked_index;
-        printf("got 1 http line : %s\n", text);
-
-        switch(m_check_state){ //根据主状态机的情况做不同的处理
-            case CHECK_STATE_REQUESTLINE: //请求行
-            {
-                ret = parse_request_line(text);
-                if(ret == BAD_REQUEST){
-                    return BAD_REQUEST; //请求语法错误，直接结束
-                }
-                break;
+//从状态机，解析一行，依据是\r\n
+http_conn::LINE_STATUS http_conn::parse_line(){
+    printf("parse_line:::\n");
+    char temp;
+    //遍历一行数据
+    for( ; m_checked_index < m_read_index; ++m_checked_index){
+        temp = m_read_buf[m_checked_index];
+        if(temp == '\r'){
+            if(m_checked_index+1 == m_read_index){
+                return LINE_OPEN; //没有读取到完整的
+            }else if(m_read_buf[m_checked_index+1]=='\n'){
+                m_read_buf[m_checked_index++] = '\0';
+                m_read_buf[m_checked_index++] = '\0';
+                return LINE_OK;
             }
-
-            case CHECK_STATE_HEADER:
-            {
-                ret = parse_headers(text);
-                if(ret == BAD_REQUEST){
-                    return BAD_REQUEST;
-                }else if(ret == GET_REQUEST){ //获取一个完整的请求头
-                    return do_request(); //执行 （解析具体请求内容的函数）
-                }
+            return LINE_BAD;
+        }else if(temp == '\n'){
+            if((m_checked_index>1) && (m_read_buf[m_checked_index-1] == '\r')){
+                m_read_buf[m_checked_index-1]= '\0';
+                m_read_buf[m_checked_index++]= '\0';
+                return LINE_OK;
             }
-
-            case CHECK_STATE_CONTENT:
-            {
-                ret = parse_content(text);
-                if(ret == GET_REQUEST){
-                    return do_request();
-                }
-                line_status = LINE_OPEN;//如果失败，行数据还不完整
-                break;
-
-            }
-
-            default :
-            {
-                return INTERNAL_ERROR;
-            }
+            return LINE_BAD;
         }
-        return NO_REQUEST; //如果整个都没有出错，请求不完整
+        //如果都不满足就继续循环
     }
-
-    return NO_REQUEST;
+    return LINE_OPEN;//跳出循环后都不满足，数据不完整，return LINE_OPEN
 }
+
+
 
 //  解析http请求行， 获得请求方法，目标URL，HTTP版本
 http_conn::HTTP_CODE http_conn::parse_request_line(char * text){
@@ -282,34 +255,63 @@ http_conn::HTTP_CODE http_conn::parse_content(char * text){
     return NO_REQUEST;
 }
 
-//从状态机，解析一行，依据是\r\n
-http_conn::LINE_STATUS http_conn::parse_line(){
-    char temp;
-    //遍历一行数据
-    for( ; m_checked_index < m_read_index; ++m_checked_index){
-        temp = m_read_buf[m_checked_index];
-        if(temp == '\r'){
-            if(m_checked_index+1 == m_read_index){
-                return LINE_OPEN; //没有读取到完整的
-            }else if(m_read_buf[m_checked_index+1]=='\n'){
-                m_read_buf[m_checked_index++] = '\0';
-                m_read_buf[m_checked_index++] = '\0';
-                return LINE_OK;
-            }
-            return LINE_BAD;
-        }else if(temp == '\n'){
-            if((m_checked_index>1) && (m_read_buf[m_checked_index-1] == '\r')){
-                m_read_buf[m_checked_index-1]= '\0';
-                m_read_buf[m_checked_index++]= '\0';
-                return LINE_OK;
-            }
-            return LINE_BAD;
-        }
-        return LINE_OPEN; //都不满足，数据不完整，return LINE_OPEN
-    }
+//主状态机
+http_conn::HTTP_CODE http_conn::process_read(){
 
-    return LINE_OK;
+    //初始状态
+    LINE_STATUS line_status = LINE_OK;
+    HTTP_CODE ret = NO_REQUEST;
+
+    char * text = 0;
+    
+    //一行一行去解析
+    while(((m_check_state == CHECK_STATE_CONTENT) && (line_status == LINE_OK)) || ((line_status = parse_line())== LINE_OK)){
+        //获取一行数据
+        text= get_line();
+        m_start_line = m_checked_index;
+        printf("got 1 http line : %s\n", text);
+
+        switch(m_check_state){ //根据主状态机的情况做不同的处理
+            case CHECK_STATE_REQUESTLINE: //请求行
+            {
+                ret = parse_request_line(text);
+                if(ret == BAD_REQUEST){
+                    return BAD_REQUEST; //请求语法错误，直接结束
+                }
+                break;
+            }
+
+            case CHECK_STATE_HEADER:
+            {
+                ret = parse_headers(text);
+                if(ret == BAD_REQUEST){
+                    return BAD_REQUEST;
+                }else if(ret == GET_REQUEST){ //获取一个完整的请求头
+                    return do_request(); //执行 （解析具体请求内容的函数）
+                }
+            }
+
+            case CHECK_STATE_CONTENT:
+            {
+                ret = parse_content(text);
+                if(ret == GET_REQUEST){
+                    return do_request();
+                }
+                line_status = LINE_OPEN;//如果失败，行数据还不完整
+                break;
+
+            }
+
+            default :
+            {
+                return INTERNAL_ERROR;
+            }
+        }
+        // return NO_REQUEST; //如果整个都没有出错，请求不完整
+    }
+    return NO_REQUEST;
 }
+
 
 //得到一个完整的HTTP请求时，分析目标文件的属性
 //目标文件存在，就使用mmap将其映射到内存地址m_file_address处，
@@ -356,7 +358,7 @@ void http_conn::unmap() {
 
 
 bool http_conn::write(){
-
+    printf("write XXXXXXX \n");
     int temp = 0;
     if ( bytes_to_send == 0 ){
         // 将要发送的字节为0，这一次响应结束。
