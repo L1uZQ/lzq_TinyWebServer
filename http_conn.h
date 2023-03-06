@@ -58,6 +58,13 @@ private:
     char m_read_buf[READ_BUFFER_SIZE]; //读缓冲区
     int m_read_index; //标读缓冲区中以及读入的客户端数据的最后一个字节的下一个位置
 
+    int m_checked_index; //当前正在分析的字符在读缓冲区的位置
+    int m_start_line; //当前正在解析的行的起始位置
+
+    CHECK_STATE m_check_state; //主状态机当前状态
+
+
+    void init();//初始化连接起始的信息，无参，私有
     HTTP_CODE process_read(); //解析http请求
     HTTP_CODE parse_request_line(char * text); //解析请求首行
     HTTP_CODE parse_headers(char * text); //解析请求头
@@ -65,7 +72,7 @@ private:
 
     //从状态机
     LINE_STATUS parse_line(); //获取一行
-
+    char * get_line(){return m_read_buf + m_start_line;}
 
 };
 

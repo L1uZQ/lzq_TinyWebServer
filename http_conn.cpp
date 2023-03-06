@@ -54,8 +54,18 @@ void http_conn::init(int sockfd, const sockaddr_in & addr){
 
     //添加到epoll对象中
     addfd(m_epollfd, sockfd, true);
-    m_user_count++; //总用户数加一    
+    m_user_count++; //总用户数加一   
+
+    init(); //把变量初始化一下 
  }
+
+void http_conn::init(){
+    m_check_state = CHECK_STATE_REQUESTLINE; //初始化状态解析请求首行
+    m_checked_index = 0; //初始化为0
+    m_start_line = 0;
+    m_read_index = 0;
+}
+
 
 //关闭连接
 void http_conn::close_conn(){
@@ -98,6 +108,20 @@ bool http_conn::read(){
 
 //主状态机
 http_conn::HTTP_CODE http_conn::process_read(){
+
+    //初始状态
+    LINE_STATUS line_status = LINE_OK;
+    HTTP_CODE ret = NO_REQUEST;
+
+    char * text = 0;
+    
+    //一行一行去解析
+    while(((m_check_state == CHECK_STATE_CONTENT) && (line_status == LINE_OK)) || ((line_status = parse_line())== LINE_OK)){
+        //获取一行数据
+        text= get_line();
+        m_start_line = m_checked_index;
+    }
+
 
     return NO_REQUEST;
 }
