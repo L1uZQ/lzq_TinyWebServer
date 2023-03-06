@@ -72,8 +72,8 @@ private:
     // 客户请求的目标文件的完整路径，其内容等于 doc_root + m_url, doc_root是网站根目?
     char m_real_file[ FILENAME_LEN ]; //客户请求的目标文件的完整路径   
      
-
     CHECK_STATE m_check_state; //主状态机当前状态
+
 
     char m_write_buf[WRITE_BUFFER_SIZE];  // 写缓冲区
     int m_write_idx;           // 写缓冲区中待发送的字节数
@@ -88,17 +88,29 @@ private:
 
 private:
     void init();//初始化连接起始的信息，无参，私有
-    HTTP_CODE process_read(); //解析http请求
+    HTTP_CODE process_read();  //解析http请求
+    bool process_write(HTTP_CODE ret); //响应http应答
+
+    //process_read()
     HTTP_CODE parse_request_line(char * text); //解析请求首行
     HTTP_CODE parse_headers(char * text); //解析请求头
     HTTP_CODE parse_content(char * text); //解析请求体
-
-    //从状态机
-    LINE_STATUS parse_line(); //获取一行
-
-
     char * get_line(){return m_read_buf + m_start_line;}
     HTTP_CODE do_request(); //具体的处理
+
+    LINE_STATUS parse_line(); //从状态机，获取一行
+
+
+    //process_write()
+    void unmap();
+    bool add_response( const char* format, ... );
+    bool add_content( const char* content ); 
+    bool add_content_type();
+    bool add_status_line( int status, const char* title ); 
+    bool add_headers( int content_length );
+    bool add_content_length( int content_length );
+    bool add_linger();
+    bool add_blank_line(); //添加空行
 
 };
 
