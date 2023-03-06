@@ -5,6 +5,21 @@
 int http_conn::m_epollfd = -1;
 int http_conn::m_user_count = 0;
 
+// 定义HTTP响应的一些状态信息
+const char* ok_200_title = "OK";
+const char* error_400_title = "Bad Request";
+const char* error_400_form = "Your request has bad syntax or is inherently impossible to satisfy.\n";
+const char* error_403_title = "Forbidden";
+const char* error_403_form = "You do not have permission to get file from this server.\n";
+const char* error_404_title = "Not Found";
+const char* error_404_form = "The requested file was not found on this server.\n";
+const char* error_500_title = "Internal Error";
+const char* error_500_form = "There was an unusual problem serving the requested file.\n";
+
+
+
+//网站资源目录
+const char * doc_root ="/home/lzq/lzq_TinyWebServer/resources";
 
 //设置文件描述符非阻塞
 void setnonblocking(int fd){
@@ -64,6 +79,15 @@ void http_conn::init(){
     m_checked_index = 0; //初始化为0
     m_start_line = 0;
     m_read_index = 0;
+
+    m_method = GET;
+    m_url = 0;
+    m_version = 0;
+    m_linker=0;
+    m_content_length=0;
+
+    bzero(m_read_buf, READ_BUFFER_SIZE);//置为0
+
 }
 
 
@@ -166,20 +190,85 @@ http_conn::HTTP_CODE http_conn::process_read(){
 
 //  解析http请求行， 获得请求方法，目标URL，HTTP版本
 http_conn::HTTP_CODE http_conn::parse_request_line(char * text){
-
     // GET / HTTP/1.1
+    m_url = strpbrk(text, " \t"); //返回空格的地方
     
+    *m_url++ = '\0';   //先把m_url变成'\0'
+
+    char * method = text;
+
+    if(strcasecmp(method, "GET")==0){
+        m_method=GET;
+    }else{
+        return BAD_REQUEST; //语法错误的请求,暂时没有实现其它请求
+    }
+
+    m_version = strpbrk(m_url, " \t");
+    if(!m_version){
+        return BAD_REQUEST;
+    }
+    *m_version ++ ='\0';
+    if(strcasecmp(m_version, "HTTP/1.1")!=0){
+        return BAD_REQUEST;
+    }
+    if(strncasecmp(m_url, "http://",7)==0){
+        m_url += 7; //把http://跳过
+        m_url = strchr(m_url, '/'); //取第一个/的位置
+        // 192.168.1.1:9006/index.html
+    }
+
+    if(!m_url || m_url[0]!='/'){
+        return BAD_REQUEST;
+    }
+
+    m_check_state = CHECK_STATE_HEADER; //主状态机状态从首行变成检查请求头
 
     return NO_REQUEST;
 }
 
+
+//解析HTTP请求的一个头部消息
 http_conn::HTTP_CODE http_conn::parse_headers(char * text){
+    //遇到空行，表示头部解析完毕
+    if(text[0]== '\0'){
+        //如果HTTP请求有消息体，则还需要读取m_content_length字节的消息体
+        //状态转移
+        if(m_content_length != 0){
+            m_check_state = CHECK_STATE_CONTENT;
+            return NO_REQUEST;
+        }
+        //请求完整
+        return GET_REQUEST;
+    } else if(strncasecmp(text, "Connection:",11)==0){
+        text += 11;
+        text += strspn(text, " \t");
+        if(strcasecmp(text,"Keep-alive")==0){
+            m_linker = true;
+        }
+    }else if(strncasecmp(text, "Content-Length:",15)==0){
+            //处理Content-Length头部字段
+            text +=15;
+            text += strspn(text, " \t");
+            m_content_length = atol(text);
 
+    } else if(strncasecmp(text, "Host:", 5)==0){
+            //处理Host头部字段
+            text += 5;
+            text += strspn(text, " \t");
+            m_host = text;
+    }else{
+            printf("unknow header\n");
+    }
     return NO_REQUEST;
 }
 
-http_conn::HTTP_CODE http_conn::parse_content(char * text){
 
+//没有真正解析请求体，只是判断是否被完整读入
+http_conn::HTTP_CODE http_conn::parse_content(char * text){
+    if(m_read_index >= (m_content_length + m_checked_index)){
+        text[m_content_length] = '\0';
+        return GET_REQUEST;
+    }
     return NO_REQUEST;
 }
 
@@ -212,11 +301,47 @@ http_conn::LINE_STATUS http_conn::parse_line(){
     return LINE_OK;
 }
 
-
+//得到一个完整的HTTP请求时，分析目标文件的属性
+//目标文件存在，就使用mmap将其映射到内存地址m_file_address处，
+//并告诉调用者获取文件成功
 http_conn::HTTP_CODE http_conn::do_request(){
+    //"/home"
+    strcpy(m_real_file, doc_root);
+    int len = strlen(doc_root);
+    strncpy(m_real_file + len, m_url, FILENAME_LEN -len -1);
+
+    //获取m_real_file文件的相关状态信息，-1失败，0成功
+    if(stat(m_real_file, &m_file_stat)<0){
+        return NO_RESOURCE;
+    }
+
+    //判断访问权限
+    if(!(m_file_stat.st_mode & S_IROTH)){
+        return FORBIDDEN_REQUEST;
+    }
+
+    //判断是否为目录
+    if(S_ISDIR(m_file_stat.st_mode)){
+        return BAD_REQUEST;
+    }
+
+    //以只读方式打开文件
+    int fd = open(m_real_file, O_RDONLY);
+    //创建内存映射,把网页的数据映射到m_file_address，将来发送给客户端
+    m_file_address = (char*)mmap(0,m_file_stat.st_size, PROT_READ, MAP_PRIVATE,fd, 0);
+    close(fd);
+    return FILE_REQUEST;
 
 }
 
+// 对内存映射区执行munmap操作
+void http_conn::unmap() {
+    if( m_file_address )
+    {
+        munmap( m_file_address, m_file_stat.st_size );
+        m_file_address = 0;
+    }
+}
 
 
 
@@ -240,4 +365,8 @@ void http_conn::process(){
     //printf("parse request, create response\n");
 
     //生成响应
+    bool write_ret = process_write(read_ret);
+    
+
+
 }
