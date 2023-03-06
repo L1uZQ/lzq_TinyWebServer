@@ -17,7 +17,8 @@ void setnonblocking(int fd){
 void addfd(int epollfd, int fd, bool one_shot){
     epoll_event event;
     event.data.fd = fd;
-    event.events = EPOLLIN | EPOLLRDHUP;
+    //event.events = EPOLLIN | EPOLLRDHUP;
+    event.events = EPOLLIN | EPOLLET | EPOLLRDHUP;
 
     if(one_shot){
         event.events | EPOLLONESHOT;
@@ -67,7 +68,30 @@ void http_conn::close_conn(){
 
 //循环读取客户数据，直到无数据可读或者对方关闭连接
 bool http_conn::read(){
-    printf("一次性读出数据\n");
+
+    if(m_read_index >= READ_BUFFER_SIZE){
+        return false;
+    }
+
+    //读取到的字节
+    int bytes_read=0;
+    while(true){
+        bytes_read = recv(m_sockfd, m_read_buf + m_read_index, READ_BUFFER_SIZE-m_read_index, 0);
+        if(bytes_read == -1){
+            if(errno == EAGAIN || errno == EWOULDBLOCK){
+                //没有数据
+                break;
+            }
+            return false;
+        }else if(bytes_read == 0){
+            //对方关闭连接
+            return false;
+        }
+
+        m_read_index += bytes_read;
+    }
+   // printf("一次性读出数据\n");
+    printf("读取到了数据: %s\n",m_read_buf);
     return true;
 }
 
@@ -79,6 +103,8 @@ bool http_conn::write(){
 //由线程池中的工作线程调用，处理http请求的入口函数
 void http_conn::process(){
     //解析http请求
+    
+    // process_read();
 
     printf("parse request, create response\n");
 

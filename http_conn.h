@@ -25,7 +25,8 @@ public:
 
     static int m_epollfd; //所有socket上的事件都被注册到同一个epoll中
     static int m_user_count; //统计用户数量
-
+    static const int READ_BUFFER_SIZE = 2048; //度缓冲区大小
+    static const int WRITE_BUFF_SIZE = 1024; //写缓冲区大小
 
 
     void process(); //处理客户端的请求
@@ -38,6 +39,10 @@ public:
 private:
     int m_sockfd; //该http连接的socket
     sockaddr_in m_address; //通信的socket地址
+
+    char m_read_buf[READ_BUFFER_SIZE]; //读缓冲区
+    int m_read_index; //标读缓冲区中以及读入的客户端数据的最后一个字节的下一个位置
+    
 
 };
 
