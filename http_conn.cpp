@@ -65,6 +65,7 @@ void http_conn::close_conn(){
     }
 }
 
+//循环读取客户数据，直到无数据可读或者对方关闭连接
 bool http_conn::read(){
     printf("一次性读出数据\n");
     return true;
