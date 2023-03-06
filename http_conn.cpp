@@ -95,6 +95,37 @@ bool http_conn::read(){
     return true;
 }
 
+
+//主状态机
+http_conn::HTTP_CODE http_conn::process_read(){
+
+    return NO_REQUEST;
+}
+
+http_conn::HTTP_CODE http_conn::parse_request_line(char * text){
+
+    return NO_REQUEST;
+}
+
+http_conn::HTTP_CODE http_conn::parse_headers(char * text){
+
+    return NO_REQUEST;
+}
+
+http_conn::HTTP_CODE http_conn::parse_content(char * text){
+
+    return NO_REQUEST;
+}
+
+//从状态机
+http_conn::LINE_STATUS http_conn::parse_line(){
+
+    return LINE_OK;
+}
+
+
+
+
 bool http_conn::write(){
     printf("一次性写完数据\n");
     return true;
@@ -103,10 +134,16 @@ bool http_conn::write(){
 //由线程池中的工作线程调用，处理http请求的入口函数
 void http_conn::process(){
     //解析http请求
-    
-    // process_read();
 
-    printf("parse request, create response\n");
+    HTTP_CODE read_ret = process_read();
+    
+    //重新检测一下
+    if(read_ret == NO_REQUEST){
+        modfd(m_epollfd, m_sockfd, EPOLLIN);
+        return ;
+    }
+
+    //printf("parse request, create response\n");
 
     //生成响应
 }
