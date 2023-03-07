@@ -12,7 +12,7 @@
 template<typename T>
 class threadpool{
 public:
-    threadpool(int thread_number = 6, int max_requests = 10000);
+    threadpool(int thread_number = 4, int max_requests = 10000);
 
     ~threadpool();
 
